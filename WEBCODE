@@ -1,0 +1,125 @@
+# CRAWLING_NEWS
+import sqlite3
+import requests
+from bs4 import BeautifulSoup
+
+
+# DB 연결 및 초기화
+con = sqlite3.connect('crawl_result.db')
+cursor = con.cursor()
+print('DB Init Accomplished')
+
+
+
+
+# 기존 테이블 삭제
+cursor.execute('DROP TABLE IF EXISTS INDEXES')
+
+
+# 새로 테이블 생성
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS INDEXES (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT,
+    price TEXT,
+    change_rate TEXT
+)
+''')
+con.commit()
+
+
+con.commit()
+
+
+
+
+def crawl_market_index():
+    print("\n [지수 크롤링]")
+    response = requests.get("https://m.stock.naver.com/")
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+
+    index_blocks = soup.find_all('a', class_='MajorMarketIndexList_link__RLSpn')
+
+
+    total = []
+    for idx, block in enumerate(index_blocks[:4]):  # 상위 4개만 가져옴
+        name = block.find('strong', class_='MajorMarketIndexList_title__lqyGk').get_text(strip=True)
+        price = block.find('div', class_='MajorMarketIndexList_price__EaMWT').get_text(strip=True)
+        ratio = block.find('div', class_='MajorMarketIndexList_ratio__MXhfV').get_text(strip=True)
+        total.append((name, price, ratio))
+
+
+    # DB에 저장
+    for name, price, rate in total:
+        cursor.execute('''
+            INSERT INTO INDEXES (name, price, change_rate)
+            VALUES (?, ?, ?)
+        ''', (name, price, rate))
+        print(f"{name} | {price} | ({rate})")
+    con.commit()
+
+
+
+
+def crawl_world_index():
+    print("\n [세계 지표 크롤링]")
+    url = "https://m.stock.naver.com/marketindex/home/major/exchange/bond"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+
+    items = soup.select('ul.MainList_list__TXIHR > li')
+
+
+    total = []
+    for item in items:
+        name = item.select_one('strong.MainListItem_name__2Nl6J').get_text(strip=True)
+        price = item.select_one('span.MainListItem_price__dP8R6').get_text(strip=True)
+
+
+        fluctuation_div = item.select_one('div.Fluctuation_article__sgZeZ')
+        fluctuation_spans = fluctuation_div.select('span.Fluctuation_fluctuation__9UU9_')
+
+
+        if len(fluctuation_spans) >= 2:
+            fluctuation_amount = fluctuation_spans[0].get_text(strip=True)
+            fluctuation_rate = fluctuation_spans[1].get_text(strip=True)
+            combined = f"{fluctuation_amount} ({fluctuation_rate})"
+        else:
+            combined = '-'
+
+
+        total.append((name, price, combined))
+
+
+    for name, price, combined in total:
+        cursor.execute('''
+            INSERT INTO INDEXES (name, price, change_rate)
+            VALUES (?, ?, ?)
+        ''', (name, price, combined))
+        print(f"{name} | {price} | {combined}")
+    con.commit()
+
+
+
+
+# 기존 데이터 삭제 후 새로 저장
+cursor.execute('DELETE FROM INDEXES')
+con.commit()
+
+
+# 크롤링 실행
+crawl_market_index()
+crawl_world_index()
+
+
+# DB 조회
+print("\n✅ DB에 저장된 전체 지표:")
+data = cursor.execute('SELECT * FROM INDEXES')
+for row in data:
+    print(row)
+
+
+# DB 닫기
+con.close()
